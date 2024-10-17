@@ -30,7 +30,7 @@ for name in sd.keys():
 
 # %%
 size = (224, 224)
-mean, std = [0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711]
+mean, std =
 
 # %%
 
@@ -44,6 +44,7 @@ class ViTConfig:
     patch_size: tuple[int, int]
     n_heads: int
     d_head: int
+    norm_data: tuple[tuple[int, int, int], tuple[int, int, int]] # mean std to norm image
 
     mlp_mult: int = 4
     causal_attn: bool = False
@@ -69,6 +70,7 @@ cfg_vit_b_16 = ViTConfig(
     patch_size=(16, 16),
     n_heads=24,
     d_head=32,
+    norm_data=([0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711]),
     mlp_mult=4,
 )
 
@@ -299,7 +301,7 @@ def load_clip_weights(  # noqa: F811
     root_key = "vision_model"
     self.pre_ln.weight.data = sd[f"{root_key}.pre_layrnorm.weight"] # yes that is a spelling mistake
     self.pre_ln.bias.data = sd[f"{root_key}.pre_layrnorm.bias"]
-    self.post_ln.weight.data = sd[f"{root_key}.post_layernorm.weight"] # yes that is a spelling mistake
+    self.post_ln.weight.data = sd[f"{root_key}.post_layernorm.weight"]
     self.post_ln.bias.data = sd[f"{root_key}.post_layernorm.bias"]
     self.out_proj.weight.data = sd["visual_projection.weight"]
 
@@ -313,6 +315,8 @@ vit.load_clip_weights(sd)
 vit(pixel_values).shape
 
 # %%
+
+
 
 
 # %%
