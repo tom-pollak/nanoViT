@@ -15,6 +15,13 @@ from fastcore.all import patch
 from sentence_transformers import SentenceTransformer, util
 
 model = SentenceTransformer('clip-ViT-B-16')
+from PIL import Image
+from urllib.request import urlopen
+
+img = Image.open(urlopen(
+    'https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/beignets-task-guide.png'
+))
+
 
 # %%
 sd_path = hf_hub_download(
@@ -30,7 +37,6 @@ for name in sd.keys():
 
 # %%
 size = (224, 224)
-mean, std =
 
 # %%
 
@@ -289,6 +295,8 @@ class ViT(nn.Module):
         x = self.pre_ln(x)
         for block in self.blocks:
             x = block(x)
+
+        x = x[:, 0, :] # select [CLS] residual (index 0)
         x = self.post_ln(x)
         x = self.out_proj(x)
         return x
@@ -310,14 +318,30 @@ def load_clip_weights(  # noqa: F811
         block.load_clip_weights(sd, layer=i)
 
 
-vit = ViT(cfg_vit_b_16)
+vit = ViT(cfg_vit_b_16).eval()
 vit.load_clip_weights(sd)
 vit(pixel_values).shape
 
 # %%
+from torchvision import transforms
 
+def build_preproc(cfg: ViTConfig):
+    h, w = cfg.image_res
+    mean, std = cfg.norm_data
+    return transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Resize((h, w)),
+        transforms.Normalize(mean, std, inplace=True),
+    ])
 
+preproc = build_preproc(cfg_vit_b_16)
+pixel_values = preproc(img).unsqueeze(0)
 
-
+with t.no_grad():
+    emb = vit(pixel_values).squeeze(0)
+print(pixel_values.shape)
+print(emb.shape)
 # %%
 
+gt_emb = t.tensor(model.encode(img))
+print(gt_emb.shape)
