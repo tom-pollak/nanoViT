@@ -31,12 +31,17 @@ sd_path = hf_hub_download(
 )
 sd = t.load(sd_path, map_location="cpu", weights_only=False)
 for name in sd.keys():
-    if (".layers" in name and ".0" not in name):# or "mlp" not in name:
-        continue
-    print(name)
+    if "vision_model.encoder.layers.0.self_attn" in name:
+    # if (".layers" in name and ".0" not in name):# or "mlp" not in name:
+    #     continue
+        print(name, sd[name].shape)
 
 # %%
-size = (224, 224)
+
+modules = dict(model[0].named_modules())
+for name, mod in modules.items():
+    if "model.vision_model.encoder.layers.0" in name:
+        print(name)
 
 # %%
 
@@ -130,14 +135,21 @@ def load_clip_weights(self: PatchEmbeddings, sd: dict):  # type: ignore
 
     # (d_model, channels, patch_size, patch_size => channels * patch_size**2, d_model)
     self.patch_embedding.weight.data = (
-        sd[f"{root_key}.patch_embedding.weight"].reshape(self.cfg.d_model, -1).T.data
+        sd[f"{root_key}.patch_embedding.weight"].reshape(self.cfg.d_model, -1).data
     )
     self.position_embedding.data = sd[f"{root_key}.position_embedding.weight"].data
 
 
 embed = PatchEmbeddings(cfg_vit_b_16)
 embed.load_clip_weights(sd)
-embed(pixel_values).shape
+
+patch_emb_out = embed(pixel_values)
+gt_embed = modules['model.vision_model.embeddings'].cpu()
+patch_emb_out_gt = gt_embed(pixel_values)
+
+print(patch_emb_out.shape)
+print(patch_emb_out_gt.shape)
+t.allclose(patch_emb_out, patch_emb_out_gt)
 
 # %%
 
@@ -341,7 +353,13 @@ with t.no_grad():
     emb = vit(pixel_values).squeeze(0)
 print(pixel_values.shape)
 print(emb.shape)
-# %%
 
 gt_emb = t.tensor(model.encode(img))
 print(gt_emb.shape)
+
+t.allclose(emb, gt_emb)
+
+# %%
+
+# %%
+
