@@ -1,4 +1,7 @@
+# %%
 # fmt: off
+
+# %%
 # %%
 import einops
 from dataclasses import dataclass
@@ -13,8 +16,11 @@ from fastcore.all import patch
 # %%
 
 from sentence_transformers import SentenceTransformer, util
-
 model = SentenceTransformer('clip-ViT-B-16')
+raw_model = model[0]
+
+# %%
+
 from PIL import Image
 from urllib.request import urlopen
 
@@ -24,24 +30,32 @@ img = Image.open(urlopen(
 
 
 # %%
+# sd_path = hf_hub_download(
+#     "sentence-transformers/clip-ViT-B-16",
+#     "0_CLIPModel/pytorch_model.bin",
+#     local_files_only=True,
+# )
 sd_path = hf_hub_download(
-    "sentence-transformers/clip-ViT-B-16",
-    "0_CLIPModel/pytorch_model.bin",
-    local_files_only=True,
+    "openai/clip-vit-base-patch16",
+    "pytorch_model.bin"
 )
+
 sd = t.load(sd_path, map_location="cpu", weights_only=False)
 for name in sd.keys():
-    if "vision_model.encoder.layers.0.self_attn" in name:
+    # if "vision_model.encoder.layers.0.self_attn" in name:
     # if (".layers" in name and ".0" not in name):# or "mlp" not in name:
     #     continue
+    if "vision" in name:
         print(name, sd[name].shape)
 
 # %%
+# import clip
+# model, preprocess = clip.load("ViT-B/16", device="cpu")
 
-modules = dict(model[0].named_modules())
+modules = dict(model.named_modules())
 for name, mod in modules.items():
-    if "model.vision_model.encoder.layers.0" in name:
-        print(name)
+    # if "model.vision_model.encoder.layers.0" in name:
+    print(name)
 
 # %%
 
@@ -54,13 +68,13 @@ class ViTConfig:
     image_res: tuple[int, int]
     patch_size: tuple[int, int]
     n_heads: int
-    d_head: int
     norm_data: tuple[tuple[int, int, int], tuple[int, int, int]] # mean std to norm image
 
     mlp_mult: int = 4
     causal_attn: bool = False
 
     # Calculated in __post_init__
+    d_head: int = None
     num_patches: int = None
     num_positions: int = None
 
@@ -68,9 +82,11 @@ class ViTConfig:
         im_h, im_w = self.image_res
         npatches_h, npatches_w = self.patch_size
         assert im_h % npatches_h == 0 and im_w % npatches_w == 0
-
         self.num_patches = (im_h // npatches_h) * (im_w // npatches_w)
         self.num_positions = self.num_patches + 1
+
+        assert self.d_model % self.n_heads == 0
+        self.d_head = self.d_model // self.n_heads
 
 
 cfg_vit_b_16 = ViTConfig(
@@ -79,8 +95,7 @@ cfg_vit_b_16 = ViTConfig(
     d_proj=512,
     image_res=(224, 224),
     patch_size=(16, 16),
-    n_heads=24,
-    d_head=32,
+    n_heads=12,
     norm_data=([0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711]),
     mlp_mult=4,
 )
@@ -142,19 +157,19 @@ def load_clip_weights(self: PatchEmbeddings, sd: dict):  # type: ignore
 
 embed = PatchEmbeddings(cfg_vit_b_16)
 embed.load_clip_weights(sd)
-
 patch_emb_out = embed(pixel_values)
+
 gt_embed = modules['model.vision_model.embeddings'].cpu()
 patch_emb_out_gt = gt_embed(pixel_values)
 
 print(patch_emb_out.shape)
 print(patch_emb_out_gt.shape)
-t.allclose(patch_emb_out, patch_emb_out_gt)
+t.allclose(patch_emb_out, patch_emb_out_gt, atol=1e-5)
 
 # %%
 
 
-class MultiHeadAttention(nn.Module):
+class Attention(nn.Module):
     def __init__(self, cfg: ViTConfig):
         super().__init__()
         self.cfg = cfg
@@ -172,7 +187,7 @@ class MultiHeadAttention(nn.Module):
             n_heads=self.cfg.n_heads,
             d_head=self.cfg.d_head,
         )
-        # batch seq n_heads d_model
+        # batch n_heads seq d_model
         q, k, v = head_tfm(q), head_tfm(k), head_tfm(v)
         attn = einops.einsum(
             q, k,
@@ -201,7 +216,7 @@ class MultiHeadAttention(nn.Module):
 
 @patch
 def load_clip_weights(  # noqa: F811
-    self: MultiHeadAttention,
+    self: Attention,
     sd: dict,
     layer: int,
 ):
@@ -216,12 +231,19 @@ def load_clip_weights(  # noqa: F811
     self.out_proj.bias.data = sd[f"{root_key}.out_proj.bias"]
 
 
-attn = MultiHeadAttention(cfg_vit_b_16)
+attn = Attention(cfg_vit_b_16)
 attn.load_clip_weights(sd, layer=0)
-attn(residual).shape
+attn_out = attn(residual)
+print(attn_out.shape)
+
+gt_attn_out = modules['model.vision_model.encoder.layers.0.self_attn'].cpu()(residual)[0]
+print(gt_attn_out.shape)
+print(t.allclose(attn_out, gt_attn_out, atol=1e-5))
 
 # %%
 
+def quick_gelu(x):
+    return x * t.sigmoid(1.702 * x)
 
 class MLP(nn.Module):
     def __init__(self, cfg: ViTConfig):
@@ -232,7 +254,7 @@ class MLP(nn.Module):
 
     def forward(self, x):
         h = self.up_proj(x)
-        acts = F.relu(h)
+        acts = quick_gelu(h)
         x_p = self.down_proj(acts)
         return x_p
 
@@ -251,7 +273,10 @@ def load_clip_weights(  # noqa: F811
 
 mlp = MLP(cfg_vit_b_16)
 mlp.load_clip_weights(sd, layer=0)
-mlp(residual).shape
+mlp_out = mlp(residual)
+
+gt_mlp_out = modules['model.vision_model.encoder.layers.0.mlp'].cpu()(residual)
+print(t.allclose(mlp_out, gt_mlp_out, atol=1e-8))
 
 # %%
 
@@ -259,14 +284,14 @@ mlp(residual).shape
 class TransformerBlock(nn.Module):
     def __init__(self, cfg: ViTConfig):
         super().__init__()
-        self.attn = MultiHeadAttention(cfg)
+        self.attn = Attention(cfg)
         self.ln1 = nn.LayerNorm(cfg.d_model)
         self.mlp = MLP(cfg)
         self.ln2 = nn.LayerNorm(cfg.d_model)
 
     def forward(self, x):
-        x = x + self.ln1(self.attn(x))
-        x = x + self.ln2(self.mlp(x))
+        x = x + self.attn(self.ln1(x))
+        x = x + self.mlp(self.ln2(x))
         return x
 
 
@@ -286,7 +311,14 @@ def load_clip_weights(  # noqa: F811
 
 block = TransformerBlock(cfg_vit_b_16)
 block.load_clip_weights(sd, 0)
-block(residual).shape
+block_out = block(residual)
+
+
+gt_block = modules["model.vision_model.encoder.layers.0"].cpu()
+attn_mask = t.full((197, 197,), 1.)
+gt_block_out = gt_block(residual, attn_mask, attn_mask)[0]
+print(t.allclose(block_out, gt_block_out, atol=1e-6))
+
 
 # %%
 
@@ -332,7 +364,9 @@ def load_clip_weights(  # noqa: F811
 
 vit = ViT(cfg_vit_b_16).eval()
 vit.load_clip_weights(sd)
-vit(pixel_values).shape
+
+# %%
+
 
 # %%
 from torchvision import transforms
@@ -341,24 +375,29 @@ def build_preproc(cfg: ViTConfig):
     h, w = cfg.image_res
     mean, std = cfg.norm_data
     return transforms.Compose([
+        transforms.Resize((h, w), interpolation=transforms.InterpolationMode.BICUBIC),
         transforms.ToTensor(),
-        transforms.Resize((h, w)),
-        transforms.Normalize(mean, std, inplace=True),
+        transforms.Normalize(mean, std),
     ])
 
 preproc = build_preproc(cfg_vit_b_16)
 pixel_values = preproc(img).unsqueeze(0)
 
+pixel_values_gt = preprocess(img).unsqueeze(0)
+t.allclose(pixel_values, pixel_values_gt)
+
+# %%
+
 with t.no_grad():
     emb = vit(pixel_values).squeeze(0)
+    gt_emb = model.encode_image(pixel_values).squeeze(0)
 print(pixel_values.shape)
 print(emb.shape)
 
-gt_emb = t.tensor(model.encode(img))
-print(gt_emb.shape)
+# gt_emb = t.tensor(model.encode(img))
+# print(gt_emb.shape)
 
-t.allclose(emb, gt_emb)
-
+print(t.allclose(emb, gt_emb, atol=1e-5))
 # %%
 
 # %%
