@@ -15,7 +15,7 @@ class ViTConfig:
     image_res: tuple[int, int]
     patch_size: tuple[int, int]
     n_heads: int
-    norm_data: tuple[tuple[int, int, int], tuple[int, int, int]] # mean std to norm image
+    norm_data: tuple[tuple[float, float, float], tuple[float, float, float]] # mean std to norm image
 
     mlp_mult: int = 4
     causal_attn: bool = False
@@ -36,7 +36,7 @@ class ViTConfig:
         self.d_head = self.d_model // self.n_heads
 
 
-def build_preprocessor(cfg: ViTConfig):
+def build_preprocessor(cfg: ViTConfig) -> transforms.Compose:
     h, w = cfg.image_res
     mean, std = cfg.norm_data
     return transforms.Compose([
