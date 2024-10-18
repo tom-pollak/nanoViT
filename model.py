@@ -1,8 +1,5 @@
 # %%
 # fmt: off
-
-# %%
-# %%
 import einops
 from dataclasses import dataclass
 from functools import partial
@@ -28,13 +25,8 @@ img = Image.open(urlopen(
     'https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/beignets-task-guide.png'
 ))
 
-
+img
 # %%
-# sd_path = hf_hub_download(
-#     "sentence-transformers/clip-ViT-B-16",
-#     "0_CLIPModel/pytorch_model.bin",
-#     local_files_only=True,
-# )
 sd_path = hf_hub_download(
     "openai/clip-vit-base-patch16",
     "pytorch_model.bin"
@@ -42,17 +34,14 @@ sd_path = hf_hub_download(
 
 sd = t.load(sd_path, map_location="cpu", weights_only=False)
 for name in sd.keys():
-    # if "vision_model.encoder.layers.0.self_attn" in name:
-    # if (".layers" in name and ".0" not in name):# or "mlp" not in name:
-    #     continue
     if "vision" in name:
-        print(name, sd[name].shape)
+        print(name, tuple(sd[name].shape))
 
 # %%
 # import clip
 # model, preprocess = clip.load("ViT-B/16", device="cpu")
 
-modules = dict(model.named_modules())
+modules = dict(raw_model.named_modules())
 for name, mod in modules.items():
     # if "model.vision_model.encoder.layers.0" in name:
     print(name)
@@ -75,15 +64,15 @@ class ViTConfig:
 
     # Calculated in __post_init__
     d_head: int = None
-    num_patches: int = None
-    num_positions: int = None
+    num_patches: tuple[int, int] = None
+    seq_length: int = None
 
     def __post_init__(self):
         im_h, im_w = self.image_res
         npatches_h, npatches_w = self.patch_size
         assert im_h % npatches_h == 0 and im_w % npatches_w == 0
-        self.num_patches = (im_h // npatches_h) * (im_w // npatches_w)
-        self.num_positions = self.num_patches + 1
+        self.num_patches = (im_h // npatches_h, im_w // npatches_w)
+        self.seq_length = self.num_patches[0] * self.num_patches[1] + 1
 
         assert self.d_model % self.n_heads == 0
         self.d_head = self.d_model // self.n_heads
@@ -101,7 +90,7 @@ cfg_vit_b_16 = ViTConfig(
 )
 
 pixel_values = t.randn(16, 3, *cfg_vit_b_16.image_res)
-residual = t.randn(16, cfg_vit_b_16.num_positions, cfg_vit_b_16.d_model)
+residual = t.randn(16, cfg_vit_b_16.seq_length, cfg_vit_b_16.d_model)
 # %%
 
 
@@ -115,27 +104,33 @@ class PatchEmbeddings(nn.Module):
     def __init__(self, cfg: ViTConfig):
         super().__init__()
         self.cfg = cfg
-        im_h, im_w = cfg.image_res
-
         self.class_embedding = nn.Parameter(t.empty(cfg.d_model))
-        self.patch_embedding = nn.Linear(
-            3 * cfg.patch_size[0] * cfg.patch_size[1], cfg.d_model, bias=False
-        )
-        self.position_embedding = nn.Parameter(t.empty(cfg.num_positions, cfg.d_model))
+        self.patch_embedding = nn.Parameter(t.empty(cfg.d_model, 3 * cfg.patch_size[0] * cfg.patch_size[1]))
+        self.position_embedding = nn.Parameter(t.empty(cfg.seq_length, cfg.d_model))
 
-    def forward(self, pixel_values):
-        "B C H W"
+    def forward(self, pixel_values: Float[Tensor, "B C H W"]):
         patched_pixels = einops.rearrange(
             pixel_values,
-            "b c (h p1) (w p2) -> b (h w) (c p1 p2)",
-            p1=self.cfg.patch_size[0],
-            p2=self.cfg.patch_size[1],
+            """ \
+            batch channel (patch_h patch_size_h) (patch_w patch_size_w) \
+         -> batch (patch_h patch_w) (channel patch_size_h patch_size_w) \
+            """,
+            patch_h=self.cfg.num_patches[0], patch_w=self.cfg.num_patches[1],
+            patch_size_h=self.cfg.patch_size[0], patch_size_w=self.cfg.patch_size[1],
         )
 
-        # batch, num_patches-1, d_model
-        patch_embeds = self.patch_embedding(patched_pixels)
-        # [CLS] patch_1 patch_2... (batch, num_patches, d_model)
-        class_embeds = self.class_embedding.expand(pixel_values.shape[0], 1, -1)
+        # batch, seq_length-1, d_model
+        patch_embeds = einops.einsum(
+            patched_pixels, self.patch_embedding,
+            "batch seq_no_cls patch, d_model patch -> batch seq_no_cls d_model"
+        )
+
+        # [CLS] patch_1 patch_2... (batch, seq_length, d_model)
+        class_embeds = einops.repeat(
+            self.class_embedding,
+            "d_model -> batch 1 d_model",
+            batch=patch_embeds.shape[0],
+        )
         embeddings = t.cat([class_embeds, patch_embeds], dim=1)
 
         embeddings = embeddings + self.position_embedding
@@ -147,12 +142,10 @@ class PatchEmbeddings(nn.Module):
 def load_clip_weights(self: PatchEmbeddings, sd: dict):  # type: ignore
     root_key = "vision_model.embeddings"
     self.class_embedding.data = sd[f"{root_key}.class_embedding"].data
-
-    # (d_model, channels, patch_size, patch_size => channels * patch_size**2, d_model)
-    self.patch_embedding.weight.data = (
-        sd[f"{root_key}.patch_embedding.weight"].reshape(self.cfg.d_model, -1).data
-    )
     self.position_embedding.data = sd[f"{root_key}.position_embedding.weight"].data
+    # (d_model, channels, patch_size, patch_size => d_model, channels * patch_size**2)
+    self.patch_embedding.data = sd[f"{root_key}.patch_embedding.weight"].reshape(self.cfg.d_model, -1).data
+
 
 
 embed = PatchEmbeddings(cfg_vit_b_16)
@@ -183,8 +176,8 @@ class Attention(nn.Module):
         q, k, v = self.q_proj(x), self.k_proj(x), self.v_proj(x)
         head_tfm = partial(
             einops.rearrange,
-            pattern="batch seq (n_heads d_head) -> batch seq n_heads d_head",
-            n_heads=self.cfg.n_heads,
+            pattern="batch seq (head d_head) -> batch seq head d_head",
+            head=self.cfg.n_heads,
             d_head=self.cfg.d_head,
         )
         # batch n_heads seq d_model
@@ -192,24 +185,23 @@ class Attention(nn.Module):
         attn = einops.einsum(
             q, k,
             """ \
-            batch seq_q n_heads d_head, \
-            batch seq_k n_heads d_head \
-            -> batch n_heads seq_q seq_k \
+            batch seq_q head d_head, \
+            batch seq_k head d_head \
+         -> batch head seq_q seq_k \
             """,
         ) / self.cfg.d_head**0.5
 
         # full attention -- no causal masking
         scores = F.softmax(attn, dim=-1)  # seq_k
         z = einops.einsum(
-            scores,
-            v,
+            scores, v,
             """ \
-            batch n_heads seq_q seq_k, \
-            batch seq_k n_heads d_head \
-            -> batch seq_q n_heads d_head \
+            batch head seq_q seq_k, \
+            batch seq_k head d_head \
+         -> batch seq_q head d_head \
             """,
         )
-        z = einops.rearrange(z, "batch seq n_heads d_head -> batch seq (n_heads d_head)")
+        z = einops.rearrange(z, "batch seq head d_head -> batch seq (head d_head)")
         up_proj = self.out_proj(z)
         return up_proj
 
@@ -401,4 +393,3 @@ print(t.allclose(emb, gt_emb, atol=1e-5))
 # %%
 
 # %%
-
