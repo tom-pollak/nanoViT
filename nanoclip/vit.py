@@ -15,7 +15,7 @@ class ViTConfig:
     image_res: tuple[int, int]
     patch_size: tuple[int, int]
     n_heads: int
-    norm_data: tuple[tuple[float, float, float], tuple[float, float, float]] # mean std to norm image
+    norm_data: tuple[tuple[float, float, float], tuple[float, float, float]] # (mean, std) to norm image
 
     mlp_mult: int = 4
     causal_attn: bool = False

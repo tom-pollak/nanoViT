@@ -1,3 +1,7 @@
+"""
+load_clip_weights_ is patched to make vit.py cleaner. Impl: weights/clip.py
+"""
+
 import pytest
 from PIL import Image
 from urllib.request import urlopen
@@ -5,14 +9,8 @@ import torch as t
 from huggingface_hub import hf_hub_download
 from sentence_transformers import SentenceTransformer
 
-from nanoclip.vit import (
-    ViT,
-    build_preprocessor,
-    PatchEmbeddings,
-    Attention,
-    MLP,
-    TransformerBlock,
-)
+from nanoclip.vit import ViT, build_preprocessor
+from nanoclip.vit import PatchEmbeddings, Attention, MLP, TransformerBlock
 from nanoclip.weights.clip import clip_vit_b_16, CFG_VIT_B_16
 
 
