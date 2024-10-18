@@ -53,7 +53,7 @@ def quick_gelu(x):
 # ███████████████████████████████████  Model  ████████████████████████████████████
 
 
-class PatchEmbeddings(nn.Module):
+class PatchEmbedding(nn.Module):
     """
     Fixed size image ViT
 
@@ -174,7 +174,7 @@ class ViT(nn.Module):
     def __init__(self, cfg: ViTConfig):
         super().__init__()
         self.cfg = cfg
-        self.embed = PatchEmbeddings(cfg)
+        self.embed = PatchEmbedding(cfg)
         self.pre_ln = nn.LayerNorm(cfg.d_model)
         self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
         self.post_ln = nn.LayerNorm(cfg.d_model)

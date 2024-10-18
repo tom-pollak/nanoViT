@@ -1,5 +1,5 @@
 """
-load_clip_weights_ is patched to make vit.py cleaner. Impl: weights/clip.py
+Weight loading functions are implemented in weights/clip.py
 """
 
 import pytest
@@ -10,8 +10,16 @@ from huggingface_hub import hf_hub_download
 from sentence_transformers import SentenceTransformer
 
 from nanoclip.vit import ViT, build_preprocessor
-from nanoclip.vit import PatchEmbeddings, Attention, MLP, TransformerBlock
-from nanoclip.weights.clip import clip_vit_b_16, CFG_VIT_B_16
+from nanoclip.vit import PatchEmbedding, Attention, MLP, TransformerBlock
+from nanoclip.weights.clip import (
+    clip_vit_b_16,
+    CFG_VIT_B_16,
+    ViTConfig,
+    load_patch_embedding_weights,
+    load_attention_weights,
+    load_mlp_weights,
+    load_transformer_block_weights,
+)
 
 
 @pytest.fixture(scope="module")
@@ -60,10 +68,26 @@ def test_e2e(img):
     assert t.allclose(emb, gt_emb, atol=1e-5)
 
 
+def test_vit_config():
+    config = ViTConfig(
+        n_layers=12,
+        d_model=768,
+        d_proj=512,
+        image_res=(224, 224),
+        patch_size=(16, 16),
+        n_heads=12,
+        norm_data=((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    )
+
+    assert config.num_patches == (14, 14)
+    assert config.seq_length == 197  # 14 * 14 + 1 (CLS token)
+    assert config.d_head == 64  # 768 // 12
+
+
 @t.no_grad()
 def test_patch_embedding(sd, modules, pixel_values):
-    embed = PatchEmbeddings(CFG_VIT_B_16)
-    embed.load_clip_weights_(sd)
+    embed = PatchEmbedding(CFG_VIT_B_16)
+    load_patch_embedding_weights(embed, sd)
     patch_emb_out = embed(pixel_values)
 
     gt_embed = modules["model.vision_model.embeddings"]
@@ -75,7 +99,7 @@ def test_patch_embedding(sd, modules, pixel_values):
 @t.no_grad()
 def test_attn(sd, modules, residual):
     attn = Attention(CFG_VIT_B_16)
-    attn.load_clip_weights_(sd, layer=0)
+    load_attention_weights(attn, sd, layer=0)
     attn_out = attn(residual)
 
     gt_attn = modules["model.vision_model.encoder.layers.0.self_attn"]
@@ -86,7 +110,7 @@ def test_attn(sd, modules, residual):
 @t.no_grad()
 def test_mlp(sd, modules, residual):
     mlp = MLP(CFG_VIT_B_16)
-    mlp.load_clip_weights_(sd, layer=0)
+    load_mlp_weights(mlp, sd, layer=0)
     mlp_out = mlp(residual)
 
     gt_mlp = modules["model.vision_model.encoder.layers.0.mlp"]
@@ -98,7 +122,7 @@ def test_mlp(sd, modules, residual):
 @t.no_grad()
 def test_xfmer_block(sd, modules, residual):
     block = TransformerBlock(CFG_VIT_B_16)
-    block.load_clip_weights_(sd, 0)
+    load_transformer_block_weights(block, sd, 0)
     block_out = block(residual)
 
     gt_block = modules["model.vision_model.encoder.layers.0"]

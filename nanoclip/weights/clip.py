@@ -3,7 +3,7 @@ from fastcore.all import patch
 import torch as t
 from nanoclip.vit import (
     ViTConfig,
-    PatchEmbeddings,
+    PatchEmbedding,
     Attention,
     MLP,
     TransformerBlock,
@@ -31,80 +31,63 @@ def clip_vit_b_16():
     sd_path = hf_hub_download("openai/clip-vit-base-patch16", "pytorch_model.bin")
     sd = t.load(sd_path, map_location="cpu", weights_only=False)
     vit = ViT(CFG_VIT_B_16)
-    vit.load_clip_weights_(sd)
+    load_vit_weights(vit, sd)
     return vit.eval()
 
 
-@patch
-def load_clip_weights_(self: PatchEmbeddings, sd: dict):  # type: ignore # noqa: F811
+def load_patch_embedding_weights(patch_embedding: PatchEmbedding, sd: dict):
     root_key = "vision_model.embeddings"
-    self.class_embedding.data = sd[f"{root_key}.class_embedding"].data
-    self.position_embedding.data = sd[f"{root_key}.position_embedding.weight"].data
-    # (d_model, channels, patch_size, patch_size => d_model, channels * patch_size**2)
-    self.patch_embedding.data = (
-        sd[f"{root_key}.patch_embedding.weight"].reshape(self.cfg.d_model, -1).data
+    patch_embedding.class_embedding.data = sd[f"{root_key}.class_embedding"].data
+    patch_embedding.position_embedding.data = sd[
+        f"{root_key}.position_embedding.weight"
+    ].data
+    patch_embedding.patch_embedding.data = (
+        sd[f"{root_key}.patch_embedding.weight"]
+        .reshape(patch_embedding.cfg.d_model, -1)
+        .data
     )
 
 
-@patch
-def load_clip_weights_(  # type: ignore # noqa: F811
-    self: Attention,
-    sd: dict,
-    layer: int,
-):
+def load_attention_weights(attention: Attention, sd: dict, layer: int):
     root_key = f"vision_model.encoder.layers.{layer}.self_attn"
-    self.q_proj.weight.data = sd[f"{root_key}.q_proj.weight"]
-    self.q_proj.bias.data = sd[f"{root_key}.q_proj.bias"]
-    self.k_proj.weight.data = sd[f"{root_key}.k_proj.weight"]
-    self.k_proj.bias.data = sd[f"{root_key}.k_proj.bias"]
-    self.v_proj.weight.data = sd[f"{root_key}.v_proj.weight"]
-    self.v_proj.bias.data = sd[f"{root_key}.v_proj.bias"]
-    self.out_proj.weight.data = sd[f"{root_key}.out_proj.weight"]
-    self.out_proj.bias.data = sd[f"{root_key}.out_proj.bias"]
+    attention.q_proj.weight.data = sd[f"{root_key}.q_proj.weight"]
+    attention.q_proj.bias.data = sd[f"{root_key}.q_proj.bias"]
+    attention.k_proj.weight.data = sd[f"{root_key}.k_proj.weight"]
+    attention.k_proj.bias.data = sd[f"{root_key}.k_proj.bias"]
+    attention.v_proj.weight.data = sd[f"{root_key}.v_proj.weight"]
+    attention.v_proj.bias.data = sd[f"{root_key}.v_proj.bias"]
+    attention.out_proj.weight.data = sd[f"{root_key}.out_proj.weight"]
+    attention.out_proj.bias.data = sd[f"{root_key}.out_proj.bias"]
 
 
-@patch
-def load_clip_weights_(  # type: ignore # noqa: F811
-    self: MLP,
-    sd: dict,
-    layer: int,
-):
+def load_mlp_weights(mlp: MLP, sd: dict, layer: int):
     root_key = f"vision_model.encoder.layers.{layer}.mlp"
-    self.up_proj.weight.data = sd[f"{root_key}.fc1.weight"]
-    self.up_proj.bias.data = sd[f"{root_key}.fc1.bias"]
-    self.down_proj.weight.data = sd[f"{root_key}.fc2.weight"]
-    self.down_proj.bias.data = sd[f"{root_key}.fc2.bias"]
+    mlp.up_proj.weight.data = sd[f"{root_key}.fc1.weight"]
+    mlp.up_proj.bias.data = sd[f"{root_key}.fc1.bias"]
+    mlp.down_proj.weight.data = sd[f"{root_key}.fc2.weight"]
+    mlp.down_proj.bias.data = sd[f"{root_key}.fc2.bias"]
 
 
-@patch
-def load_clip_weights_(  # type: ignore # noqa: F811
-    self: TransformerBlock,
-    sd: dict,
-    layer: int,
-):
+def load_transformer_block_weights(block: TransformerBlock, sd: dict, layer: int):
     root_key = f"vision_model.encoder.layers.{layer}"
-    self.ln1.weight.data = sd[f"{root_key}.layer_norm1.weight"]
-    self.ln1.bias.data = sd[f"{root_key}.layer_norm1.bias"]
-    self.ln2.weight.data = sd[f"{root_key}.layer_norm2.weight"]
-    self.ln2.bias.data = sd[f"{root_key}.layer_norm2.bias"]
-    self.attn.load_clip_weights_(sd, layer)
-    self.mlp.load_clip_weights_(sd, layer)
+    block.ln1.weight.data = sd[f"{root_key}.layer_norm1.weight"]
+    block.ln1.bias.data = sd[f"{root_key}.layer_norm1.bias"]
+    block.ln2.weight.data = sd[f"{root_key}.layer_norm2.weight"]
+    block.ln2.bias.data = sd[f"{root_key}.layer_norm2.bias"]
+    load_attention_weights(block.attn, sd, layer)
+    load_mlp_weights(block.mlp, sd, layer)
 
 
-@patch
-def load_clip_weights_(  # type: ignore # noqa: F811
-    self: ViT,
-    sd: dict,
-):
+def load_vit_weights(vit: ViT, sd: dict):
     root_key = "vision_model"
-    self.pre_ln.weight.data = sd[
+    vit.pre_ln.weight.data = sd[
         f"{root_key}.pre_layrnorm.weight"
     ]  # yes that is a spelling mistake
-    self.pre_ln.bias.data = sd[f"{root_key}.pre_layrnorm.bias"]
-    self.post_ln.weight.data = sd[f"{root_key}.post_layernorm.weight"]
-    self.post_ln.bias.data = sd[f"{root_key}.post_layernorm.bias"]
-    self.out_proj.weight.data = sd["visual_projection.weight"]
+    vit.pre_ln.bias.data = sd[f"{root_key}.pre_layrnorm.bias"]
+    vit.post_ln.weight.data = sd[f"{root_key}.post_layernorm.weight"]
+    vit.post_ln.bias.data = sd[f"{root_key}.post_layernorm.bias"]
+    vit.out_proj.weight.data = sd["visual_projection.weight"]
 
-    self.embed.load_clip_weights_(sd)
-    for i, block in enumerate(self.blocks):
-        block.load_clip_weights_(sd, layer=i)
+    load_patch_embedding_weights(vit.embed, sd)
+    for i, block in enumerate(vit.blocks):
+        load_transformer_block_weights(block, sd, layer=i)
