@@ -62,10 +62,10 @@ def load_attention_weights(attention: Attention, sd: dict, layer: int):
 
 def load_mlp_weights(mlp: MLP, sd: dict, layer: int):
     root_key = f"vision_model.encoder.layers.{layer}.mlp"
-    mlp.up_proj.weight.data = sd[f"{root_key}.fc1.weight"]
-    mlp.up_proj.bias.data = sd[f"{root_key}.fc1.bias"]
-    mlp.down_proj.weight.data = sd[f"{root_key}.fc2.weight"]
-    mlp.down_proj.bias.data = sd[f"{root_key}.fc2.bias"]
+    mlp.c_fc.weight.data = sd[f"{root_key}.fc1.weight"]
+    mlp.c_fc.bias.data = sd[f"{root_key}.fc1.bias"]
+    mlp.c_proj.weight.data = sd[f"{root_key}.fc2.weight"]
+    mlp.c_proj.bias.data = sd[f"{root_key}.fc2.bias"]
 
 
 def load_transformer_block_weights(block: TransformerBlock, sd: dict, layer: int):

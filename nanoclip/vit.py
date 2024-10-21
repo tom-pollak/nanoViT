@@ -105,7 +105,7 @@ class Attention(nn.Module):
         self.q_proj = nn.Linear(cfg.d_model, cfg.d_model, bias=True)
         self.k_proj = nn.Linear(cfg.d_model, cfg.d_model, bias=True)
         self.v_proj = nn.Linear(cfg.d_model, cfg.d_model, bias=True)
-        self.out_proj = nn.Linear(cfg.d_model, cfg.d_model, bias=True)
+        self.c_proj = nn.Linear(cfg.d_model, cfg.d_model, bias=True)
 
     def forward(self, x):
         # batch seq d_model
@@ -138,22 +138,22 @@ class Attention(nn.Module):
             """,
         )
         z = einops.rearrange(z, "batch seq head d_head -> batch seq (head d_head)")
-        up_proj = self.out_proj(z)
-        return up_proj
+        out = self.c_proj(z)
+        return out
 
 
 class MLP(nn.Module):
     def __init__(self, cfg: ViTConfig):
         super().__init__()
         self.cfg = cfg
-        self.up_proj = nn.Linear(cfg.d_model, cfg.d_model * cfg.mlp_mult, bias=True)
-        self.down_proj = nn.Linear(cfg.d_model * cfg.mlp_mult, cfg.d_model, bias=True)
+        self.c_fc = nn.Linear(cfg.d_model, cfg.d_model * cfg.mlp_mult, bias=True)
+        self.c_proj = nn.Linear(cfg.d_model * cfg.mlp_mult, cfg.d_model, bias=True)
 
     def forward(self, x):
-        h = self.up_proj(x)
+        h = self.c_fc(x)
         acts = quick_gelu(h)
-        x_p = self.down_proj(acts)
-        return x_p
+        out = self.c_proj(acts)
+        return out
 
 
 class TransformerBlock(nn.Module):

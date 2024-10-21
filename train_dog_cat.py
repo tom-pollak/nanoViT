@@ -10,11 +10,7 @@ dd: DatasetDict = load_dataset(
 ).train_test_split(0.2)  # type: ignore
 lbl_feat = dd["train"].features["labels"]
 
-# %%
-
-nepochs = 5
-bs = 64
-val_bs = bs * 2
+# ███████████████████████████████████  params  ███████████████████████████████████
 
 vit_cfg = ViTConfig(
     n_layers=8,
@@ -30,36 +26,52 @@ vit_cfg = ViTConfig(
     mlp_mult=4,
 )
 
-vit = ViT(vit_cfg)
+nepochs = 5
+bs = 64
+lr = 1e-3
+wd = 1e-2
 
+val_bs = bs * 2
+
+device = (
+    "cuda"
+    if t.cuda.is_available()
+    else "mps"
+    if t.backends.mps.is_available()
+    else "cpu"
+)
+
+
+# ███████████████████████████████████  setup  ████████████████████████████████████
+
+from nanoclip.lsuv import LSUV_
+
+LSUV_()
+
+# def init_weights_(vit: ViT):
+#     for name, param in vit.named_parameters(recurse=True):
+#         if param.requires_grad:
+#             if "bias" in name:
+#                 init_func = nn.init.zeros_
+#             elif "class_embedding" in name:
+#                 init_func = nn.init.normal_
+#             elif "ln" in name:
+#                 init_func = None
+#             else:
+#                 init_func = nn.init.kaiming_normal_
+
+#             if init_func is not None:
+#                 init_func(param)
+
+
+vit = ViT(vit_cfg).to(device)
+init_weights_(vit)
 preproc = build_preprocessor(vit_cfg)
 
-# batch = next(train_dl)
+opt = t.optim.AdamW(vit.parameters(), lr=lr, weight_decay=wd)
 
 
-def init_weights_(vit: ViT):
-    for name, param in vit.named_parameters(recurse=True):
-        if param.requires_grad:
-            if "bias" in name:
-                init_func = nn.init.zeros_
-            elif "class_embedding" in name:
-                init_func = nn.init.normal_
-            elif "ln" in name:
-                init_func = None
-            else:
-                init_func = nn.init.kaiming_normal_
-
-            if init_func is not None:
-                init_func(param)
-
-
-init_weights_(vit)
-
-# %%
-
-device = "mps"
-vit = vit.to(device)
-opt = t.optim.AdamW(vit.parameters(), lr=1e-3, weight_decay=1e-2)
+# ███████████████████████████████████  train  ████████████████████████████████████
 
 for epoch in range(nepochs):
     # Train
@@ -103,5 +115,3 @@ for epoch in range(nepochs):
         print(
             f"Epoch: {epoch} | Loss: {t.tensor(losses).mean():.4f} | Accuracy: {t.tensor(accuracies).mean():.4f}"
         )
-
-# %%
