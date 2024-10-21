@@ -10,7 +10,7 @@ dd: DatasetDict = load_dataset(
 ).train_test_split(0.2)  # type: ignore
 lbl_feat = dd["train"].features["labels"]
 
-# ███████████████████████████████████  params  ███████████████████████████████████
+# ███████████████████████████████████  config  ███████████████████████████████████
 
 vit_cfg = ViTConfig(
     n_layers=8,
@@ -18,7 +18,7 @@ vit_cfg = ViTConfig(
     d_proj=2,  # 2 classes
     image_res=(224, 224),
     patch_size=(32, 32),
-    n_heads=12,
+    n_heads=6,
     norm_data=(
         (0.48145466, 0.4578275, 0.40821073),
         (0.26862954, 0.26130258, 0.27577711),
@@ -28,7 +28,7 @@ vit_cfg = ViTConfig(
 
 nepochs = 5
 bs = 64
-lr = 1e-3
+lr = 4e-4
 wd = 1e-2
 
 val_bs = bs * 2
@@ -41,41 +41,24 @@ device = (
     else "cpu"
 )
 
+# %%
 
 # ███████████████████████████████████  setup  ████████████████████████████████████
 
-from nanoclip.lsuv import LSUV_
-
-LSUV_()
-
-# def init_weights_(vit: ViT):
-#     for name, param in vit.named_parameters(recurse=True):
-#         if param.requires_grad:
-#             if "bias" in name:
-#                 init_func = nn.init.zeros_
-#             elif "class_embedding" in name:
-#                 init_func = nn.init.normal_
-#             elif "ln" in name:
-#                 init_func = None
-#             else:
-#                 init_func = nn.init.kaiming_normal_
-
-#             if init_func is not None:
-#                 init_func(param)
-
 
 vit = ViT(vit_cfg).to(device)
-init_weights_(vit)
+vit.init_weights_()
 preproc = build_preprocessor(vit_cfg)
 
 opt = t.optim.AdamW(vit.parameters(), lr=lr, weight_decay=wd)
 
+# %%
 
 # ███████████████████████████████████  train  ████████████████████████████████████
 
 for epoch in range(nepochs):
     # Train
-    train_dl = dd["train"].shuffle(epoch).iter(bs)
+    train_dl = dd["train"].shuffle(seed=epoch).iter(bs)
     vit.train()
     pbar = tqdm(enumerate(train_dl), total=len(dd["train"]) // bs, leave=False)
     for step, batch in pbar:

@@ -1,4 +1,5 @@
 # fmt: off
+import math
 from dataclasses import dataclass
 from functools import partial
 import einops
@@ -191,3 +192,14 @@ class ViT(nn.Module):
         x = self.post_ln(x)
         x = self.out_proj(x)
         return x
+
+    def init_weights_(self):
+        for name, param in self.named_parameters(recurse=True):
+            if name.endswith("c_proj.weight"): # residual stream projection, GPT2 init
+                t.nn.init.normal_(param, mean=0.0, std=0.02 / math.sqrt(2 * self.cfg.n_layers))
+            elif isinstance(param, nn.Linear):
+                t.nn.init.normal_(param.weight, mean=0.0, std=0.02)
+                if param.bias is not None:
+                    t.nn.init.zeros_(param.bias)
+            elif isinstance(param, nn.Embedding) or name.endswith("embedding"):
+                t.nn.init.normal_(param.weight if hasattr(param, "weight") else param, mean=0.0, std=0.02) # type: ignore
