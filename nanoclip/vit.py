@@ -40,6 +40,7 @@ def build_preprocessor(cfg: ViTConfig) -> transforms.Compose:
     h, w = cfg.image_res
     mean, std = cfg.norm_data
     return transforms.Compose([
+        transforms.Lambda(lambda im: im.convert("RGB")),
         transforms.Resize((h, w), interpolation=transforms.InterpolationMode.BICUBIC),
         transforms.ToTensor(),
         transforms.Normalize(mean, std),
