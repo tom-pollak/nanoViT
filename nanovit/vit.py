@@ -5,7 +5,9 @@ from functools import partial
 import einops
 import torch as t
 import torch.nn as nn
+from torch import Tensor
 from torchvision import transforms
+from jaxtyping import Float
 
 
 @dataclass
@@ -60,6 +62,10 @@ class PatchEmbedding(nn.Module):
 
     [CLS] patch_1 patch_2
     """
+    class_embedding: Float[Tensor, "d_model"]
+    patch_embedding: Float[Tensor, "d_model (channels patch_size patch_size)"]
+    position_embedding: Float[Tensor, "seq d_model"]
+
 
     def __init__(self, cfg: ViTConfig):
         super().__init__()
@@ -72,10 +78,10 @@ class PatchEmbedding(nn.Module):
         patched_pixels = einops.rearrange(
             pixel_values,
             """ \
-            batch channel (patch_h patch_size_h) (patch_w patch_size_w) \
-         -> batch (patch_h patch_w) (channel patch_size_h patch_size_w) \
+            batch channel (num_patch_h patch_size_h) (num_patch_w patch_size_w) \
+         -> batch (num_patch_h num_patch_w) (channel patch_size_h patch_size_w) \
             """,
-            patch_h=self.cfg.num_patches[0], patch_w=self.cfg.num_patches[1],
+            num_patch_h=self.cfg.num_patches[0], num_patch_w=self.cfg.num_patches[1],
             patch_size_h=self.cfg.patch_size, patch_size_w=self.cfg.patch_size,
         )
 
