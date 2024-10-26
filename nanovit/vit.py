@@ -14,7 +14,7 @@ class ViTConfig:
     d_model: int
     d_proj: int
     image_res: tuple[int, int]
-    patch_size: tuple[int, int]
+    patch_size: int
     n_heads: int
     norm_data: tuple[tuple[float, float, float], tuple[float, float, float]] # (mean, std) to norm image
 
@@ -28,9 +28,8 @@ class ViTConfig:
 
     def __post_init__(self):
         im_h, im_w = self.image_res
-        npatches_h, npatches_w = self.patch_size
-        assert im_h % npatches_h == 0 and im_w % npatches_w == 0
-        self.num_patches = (im_h // npatches_h, im_w // npatches_w)
+        assert im_h % self.patch_size == 0 and im_w % self.patch_size == 0
+        self.num_patches = (im_h // self.patch_size, im_w // self.patch_size)
         self.seq_length = self.num_patches[0] * self.num_patches[1] + 1
 
         assert self.d_model % self.n_heads == 0
@@ -66,7 +65,7 @@ class PatchEmbedding(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.class_embedding = nn.Parameter(t.empty(cfg.d_model))
-        self.patch_embedding = nn.Parameter(t.empty(cfg.d_model, 3 * cfg.patch_size[0] * cfg.patch_size[1]))
+        self.patch_embedding = nn.Parameter(t.empty(cfg.d_model, 3 * cfg.patch_size**2))
         self.position_embedding = nn.Parameter(t.empty(cfg.seq_length, cfg.d_model))
 
     def forward(self, pixel_values):
@@ -77,7 +76,7 @@ class PatchEmbedding(nn.Module):
          -> batch (patch_h patch_w) (channel patch_size_h patch_size_w) \
             """,
             patch_h=self.cfg.num_patches[0], patch_w=self.cfg.num_patches[1],
-            patch_size_h=self.cfg.patch_size[0], patch_size_w=self.cfg.patch_size[1],
+            patch_size_h=self.cfg.patch_size, patch_size_w=self.cfg.patch_size,
         )
 
         # batch, seq_length-1, d_model

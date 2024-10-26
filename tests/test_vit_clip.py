@@ -74,7 +74,7 @@ def test_vit_config():
         d_model=768,
         d_proj=512,
         image_res=(224, 224),
-        patch_size=(16, 16),
+        patch_size=16,
         n_heads=12,
         norm_data=((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     )

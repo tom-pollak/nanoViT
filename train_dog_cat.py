@@ -17,7 +17,7 @@ vit_cfg = ViTConfig(
     d_model=192,
     d_proj=2,  # 2 classes
     image_res=(224, 224),
-    patch_size=(32, 32),
+    patch_size=32,
     n_heads=6,
     norm_data=(
         (0.48145466, 0.4578275, 0.40821073),

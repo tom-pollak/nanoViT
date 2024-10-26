@@ -1,6 +1,5 @@
 # %%
 from dataclasses import dataclass
-import torch as t
 from torch import nn
 import torch.nn.functional as F
 

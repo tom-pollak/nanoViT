@@ -16,7 +16,7 @@ CFG_VIT_B_16 = ViTConfig(
     d_model=768,
     d_proj=512,
     image_res=(224, 224),
-    patch_size=(16, 16),
+    patch_size=16,
     n_heads=12,
     norm_data=(
         (0.48145466, 0.4578275, 0.40821073),
@@ -55,8 +55,8 @@ def load_attention_weights(attention: Attention, sd: dict, layer: int):
     attention.k_proj.bias.data = sd[f"{root_key}.k_proj.bias"]
     attention.v_proj.weight.data = sd[f"{root_key}.v_proj.weight"]
     attention.v_proj.bias.data = sd[f"{root_key}.v_proj.bias"]
-    attention.out_proj.weight.data = sd[f"{root_key}.out_proj.weight"]
-    attention.out_proj.bias.data = sd[f"{root_key}.out_proj.bias"]
+    attention.c_proj.weight.data = sd[f"{root_key}.out_proj.weight"]
+    attention.c_proj.bias.data = sd[f"{root_key}.out_proj.bias"]
 
 
 def load_mlp_weights(mlp: MLP, sd: dict, layer: int):
