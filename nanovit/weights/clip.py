@@ -1,7 +1,6 @@
 from huggingface_hub import hf_hub_download
-from fastcore.all import patch
 import torch as t
-from nanoclip.vit import (
+from nanovit.vit import (
     ViTConfig,
     PatchEmbedding,
     Attention,

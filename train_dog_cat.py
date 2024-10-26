@@ -2,7 +2,7 @@
 import torch as t
 from torch import nn
 from tqdm import tqdm
-from nanoclip import ViT, ViTConfig, build_preprocessor
+from nanovit import ViT, ViTConfig, build_preprocessor
 from datasets import load_dataset, DatasetDict
 
 dd: DatasetDict = load_dataset(

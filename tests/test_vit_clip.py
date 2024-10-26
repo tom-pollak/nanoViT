@@ -9,9 +9,9 @@ import torch as t
 from huggingface_hub import hf_hub_download
 from sentence_transformers import SentenceTransformer
 
-from nanoclip.vit import ViT, build_preprocessor
-from nanoclip.vit import PatchEmbedding, Attention, MLP, TransformerBlock
-from nanoclip.weights.clip import (
+from nanovit.vit import ViT, build_preprocessor
+from nanovit.vit import PatchEmbedding, Attention, MLP, TransformerBlock
+from nanovit.weights.clip import (
     clip_vit_b_16,
     CFG_VIT_B_16,
     ViTConfig,
