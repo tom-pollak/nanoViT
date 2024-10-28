@@ -2,8 +2,10 @@
 import torch as t
 from torch import nn
 from tqdm import tqdm
-from nanovit import ViT, ViTConfig, build_preprocessor
 from datasets import load_dataset, DatasetDict
+
+from nanovit import ViT, ViTConfig, build_preprocessor
+from nanovit.schedule import cosine_schedule
 
 dd: DatasetDict = load_dataset(
     "microsoft/cats_vs_dogs", split="train"
@@ -28,11 +30,26 @@ vit_cfg = ViTConfig(
     ),
     mlp_mult=4,
 )
+# pool_type: gap
+# posemb: sincos2d
 
-nepochs = 5
-bs = 64
-lr = 4e-4
-wd = 1e-2
+nclasses = 1000
+nepochs = 90
+bs = 1024
+lr = 1e-3
+wd = 1e-4
+grad_clip = 1.0
+warmup_steps = 10_000
+sched = cosine_schedule
+# bfloat16
+# mixup: 0.2
+# 99% train test split
+
+loss = "softmax_xent"
+
+# inception crop(224) flip_lr randaug(2, 10)
+# resize_small(256) central_crop(224)
+
 
 val_bs = bs * 2
 
@@ -43,3 +60,10 @@ device = (
     if t.backends.mps.is_available()
     else "cpu"
 )
+
+#  %%
+
+
+# %%
+
+
