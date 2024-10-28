@@ -1,4 +1,4 @@
-# ViTs From Scratch
+# ViTs From Scratch (WIP)
 
 Exercise:
 
