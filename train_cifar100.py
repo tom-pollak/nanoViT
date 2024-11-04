@@ -7,9 +7,7 @@ from datasets import load_dataset, DatasetDict
 from nanovit import ViT, ViTConfig, build_preprocessor
 from nanovit.schedule import cosine_schedule
 
-dd: DatasetDict = load_dataset(
-    "microsoft/cats_vs_dogs", split="train"
-).train_test_split(0.2)  # type: ignore
+dd: DatasetDict = load_dataset("uoft-cs/cifar100", split="train") # type: ignore
 lbl_feat = dd["train"].features["labels"]
 
 # %%
