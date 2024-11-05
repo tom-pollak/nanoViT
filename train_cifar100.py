@@ -3,6 +3,7 @@
 200 epochs (~15mins on a 3090)
 Accuracy: 68.5%
 """
+
 # %%
 import random
 from typing import Literal
@@ -103,7 +104,6 @@ mixup = transforms.v2.MixUp(alpha=1.0, num_classes=train_cfg.n_classes)  # type:
 # %% ████████████████████████████████  dataset & dl  ████████████████████████████████
 
 dd: DatasetDict = load_dataset("uoft-cs/cifar100")  # type: ignore
-feats = dd["train"].features
 
 
 def train_collate_fn(batch: list[dict]):
