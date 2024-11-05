@@ -1,14 +1,15 @@
 # %%
-import wandb
-import torch as t
-from torch import nn
-from tqdm import tqdm
-from dataclasses import dataclass, asdict, field
 from typing import Literal
+from dataclasses import dataclass, asdict
+from tqdm import tqdm
+import wandb
+
+import torch as t
+import torchvision.transforms.functional as TF
 from datasets import load_dataset, DatasetDict
 
 from nanovit import ViT, ViTConfig, build_preprocessor
-from nanovit.schedule import cosine_schedule
+from nanovit.schedule import cosine_schedule, linear_schedule
 
 print = tqdm.external_write_mode()(print)  # tqdm friendly print
 
@@ -32,6 +33,15 @@ vit_cfg = ViTConfig(
 # pool_type: gap
 # posemb: sincos2d
 
+# bfloat16
+# mixup: 0.2
+# 99% train test split
+
+# loss = "softmax_xent"
+
+# inception crop(224) flip_lr randaug(2, 10)
+# resize_small(256) central_crop(224)
+
 
 @dataclass
 class TrainConfig:
@@ -49,15 +59,8 @@ class TrainConfig:
 train_cfg = TrainConfig()
 
 # %%
-# bfloat16
-# mixup: 0.2
-# 99% train test split
 
-# loss = "softmax_xent"
-
-# inception crop(224) flip_lr randaug(2, 10)
-# resize_small(256) central_crop(224)
-
+# ███████████████████████████████████  model  ████████████████████████████████████
 
 device = (
     "cuda"
@@ -69,14 +72,18 @@ device = (
 
 vit = ViT(vit_cfg).to(device)
 
-preproc = build_preprocessor(vit_cfg)
 
 opt = t.optim.AdamW(vit.parameters(), lr=train_cfg.lr, weight_decay=train_cfg.wd)
 
 # %%
 
+
+# ███████████████████████████████  dataset & xfms  ███████████████████████████████
+
 dd: DatasetDict = load_dataset("uoft-cs/cifar100")  # type: ignore
 feats = dd["train"].features
+
+preproc = build_preprocessor(vit_cfg)
 
 
 # %%
@@ -90,13 +97,19 @@ wandb.init(
 def single_step(batch: dict):
     images, labels = batch["image"], batch["fine_label"]  # type: ignore
     pixel_values = t.stack([preproc(im) for im in images]).to(device)
-    logits = vit(pixel_values)
-    loss = t.nn.functional.cross_entropy(logits, t.tensor(labels, device=device))
+    with t.autocast(device_type=device):
+        logits = vit(pixel_values)
+        loss = t.nn.functional.cross_entropy(logits, t.tensor(labels, device=device))
     accuracy = (logits.argmax(dim=-1) == labels).float().mean()
     return loss, accuracy
 
 
+sched = cosine_schedule if train_cfg.sched == "cosine_schedule" else linear_schedule
+
 for epoch in range(train_cfg.nepochs):
+    lr = sched(epoch, train_cfg.lr, train_cfg.nepochs, train_cfg.warmup_steps)
+    opt.param_groups[0]["lr"] = lr
+
     train_dl = dd["train"].shuffle(seed=epoch).iter(train_cfg.bs)
     vit.train()
     pbar = tqdm(
