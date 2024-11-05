@@ -1,4 +1,5 @@
 # %%
+import random
 from typing import Literal
 from dataclasses import dataclass, asdict
 from tqdm import tqdm
@@ -31,15 +32,20 @@ device = (
 
 @dataclass
 class TrainConfig:
-    nepochs: int = 200
-    nclasses: int = 100
+    n_classes: int = 100
+    n_epochs: int = 200
     bs: int = 256
     val_bs: int = 512
     lr: float = 1e-3
     wd: float = 3e-2
     grad_clip: float = 1.0
-    warmup_steps: int = 5_000
+    warmup_steps: int = 4_000
     sched: Literal["cosine_schedule", "linear_schedule"] = "cosine_schedule"
+    # augmentation
+    rand_crop_scale: tuple[float, float] = (0.9, 1.0)
+    hflip_p: float = 0.5
+    mixup_p: float = 0.2
+    autoaugment_policy: str = "cifar10"
 
 
 train_cfg = TrainConfig()
@@ -48,7 +54,7 @@ train_cfg = TrainConfig()
 vit_cfg = ViTConfig(
     n_layers=6,
     d_model=192,
-    d_proj=train_cfg.nclasses,
+    d_proj=train_cfg.n_classes,
     image_res=(32, 32),
     patch_size=4,
     n_heads=8,
@@ -71,12 +77,15 @@ train_xfms = transforms.Compose(
     [
         transforms.RandomResizedCrop(
             size=vit_cfg.image_res,
-            scale=(0.9, 1.0),
+            scale=train_cfg.rand_crop_scale,
             interpolation=transforms.InterpolationMode.BICUBIC,
         ),
-        transforms.RandomHorizontalFlip(),
-        # transforms.RandAugment(num_ops=2, magnitude=10),
-        transforms.AutoAugment(policy=transforms.AutoAugmentPolicy.CIFAR10),
+        transforms.RandomHorizontalFlip(p=train_cfg.hflip_p),
+        transforms.AutoAugment(
+            policy=transforms.autoaugment.AutoAugmentPolicy(
+                train_cfg.autoaugment_policy
+            )
+        ),
         img2tensor,
     ]
 )
@@ -84,18 +93,17 @@ train_xfms = transforms.Compose(
 
 valid_xfms = transforms.Compose([img2tensor])
 
-# mixup_or_cutmix = transforms.RandomChoice(
-#     [
-#         transforms.v2.MixUp(num_classes=train_cfg.nclasses),  # type: ignore
-#         transforms.v2.CutMix(num_classes=train_cfg.nclasses),  # type: ignore
-#     ]
-# )
+mixup = transforms.v2.MixUp(alpha=1.0, num_classes=train_cfg.n_classes)  # type: ignore
+
+
+###
 
 
 def train_collate_fn(batch: list[dict]):
     pixel_values = t.stack([train_xfms(x["img"]) for x in batch])
     labels = t.tensor([x["fine_label"] for x in batch])
-    # pixel_values, labels = mixup_or_cutmix(pixel_values, labels)
+    if random.random() < train_cfg.mixup_p:
+        pixel_values, labels = mixup(pixel_values, labels)
     return pixel_values, labels
 
 
@@ -123,21 +131,23 @@ valid_dl = DataLoader(
 )
 
 
-# %% ████████████████████████████████  init & train  ████████████████████████████████
+# %% ████████████████████████████████████  init  ████████████████████████████████████
+
+vit = ViT(vit_cfg).to(device)
+vit = t.compile(vit)
+vit.init_weights_()
+n_params = sum(p.numel() for p in vit.parameters())
+print(f"Number of parameters: {n_params:,}")
+
+opt = t.optim.AdamW(vit.parameters(), lr=train_cfg.lr, weight_decay=train_cfg.wd)
+
+# %% ███████████████████████████████████  train  ████████████████████████████████████
 
 wandb.init(
     project="nanovit-cifar100",
     config={"vit_cfg": asdict(vit_cfg), "train_cfg": asdict(train_cfg)},
     settings=wandb.Settings(code_dir="."),
 )
-
-vit = ViT(vit_cfg).to(device)
-vit.init_weights_()
-n_params = sum(p.numel() for p in vit.parameters())
-print(f"Number of parameters: {n_params:,}")
-wandb.run.summary["n_params"] = n_params
-
-opt = t.optim.AdamW(vit.parameters(), lr=train_cfg.lr, weight_decay=train_cfg.wd)
 
 
 def single_step(batch):
@@ -156,9 +166,9 @@ def single_step(batch):
 
 sched = cosine_schedule if train_cfg.sched == "cosine_schedule" else linear_schedule
 steps_per_epoch = len(dd["train"]) // train_cfg.bs
-max_steps = train_cfg.nepochs * steps_per_epoch
+max_steps = train_cfg.n_epochs * steps_per_epoch
 
-for epoch in tqdm(range(train_cfg.nepochs)):
+for epoch in tqdm(range(train_cfg.n_epochs)):
     vit.train()
     pbar = tqdm(enumerate(train_dl), total=steps_per_epoch, leave=False)
     for step, batch in pbar:

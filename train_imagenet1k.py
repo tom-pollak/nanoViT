@@ -51,6 +51,7 @@ loss = "softmax_xent"
 # inception crop(224) flip_lr randaug(2, 10)
 # resize_small(256) central_crop(224)
 
+# transforms.RandAugment(num_ops=2, magnitude=10),
 
 val_bs = bs * 2
 
