@@ -17,11 +17,11 @@ print = tqdm.external_write_mode()(print)  # tqdm friendly print
 
 vit_cfg = ViTConfig(
     n_layers=8,
-    d_model=192,
+    d_model=512,
     d_proj=100,  # 100 classes
     image_res=(32, 32),
-    patch_size=16,
-    n_heads=6,
+    patch_size=4,
+    n_heads=8,
     norm_data=(
         (0.48145466, 0.4578275, 0.40821073),
         (0.26862954, 0.26130258, 0.27577711),
@@ -67,6 +67,7 @@ device = (
 )
 
 vit = ViT(vit_cfg).to(device)
+vit.init_weights_()
 
 
 opt = t.optim.AdamW(vit.parameters(), lr=train_cfg.lr, weight_decay=train_cfg.wd)
@@ -104,29 +105,36 @@ wandb.init(
 
 
 def single_step(batch: dict, preproc: transforms.Compose):
-    images, labels = batch["image"], batch["fine_label"]  # type: ignore
+    images, labels = batch["img"], t.tensor(batch["fine_label"], device=device)  # type: ignore
     pixel_values = t.stack([preproc(im) for im in images]).to(device)
     with t.autocast(device_type=device):
         logits = vit(pixel_values)
-        loss = t.nn.functional.cross_entropy(logits, t.tensor(labels, device=device))
+        loss = t.nn.functional.cross_entropy(logits, labels)
     accuracy = (logits.argmax(dim=-1) == labels).float().mean()
     return loss, accuracy
 
 
 sched = cosine_schedule if train_cfg.sched == "cosine_schedule" else linear_schedule
+steps_per_epoch = len(dd["train"]) // train_cfg.bs
+max_steps = train_cfg.nepochs * steps_per_epoch
 
 for epoch in range(train_cfg.nepochs):
-    lr = sched(epoch, train_cfg.lr, train_cfg.nepochs, train_cfg.warmup_steps)
-    opt.param_groups[0]["lr"] = lr
-
-    train_dl = dd["train"].shuffle(seed=epoch).iter(train_cfg.bs)
+    train_dl = dd["train"].shuffle(seed=epoch).iter(train_cfg.bs, drop_last_batch=True)
     vit.train()
-    pbar = tqdm(
-        enumerate(train_dl), total=len(dd["train"]) // train_cfg.bs, leave=False
-    )
+    pbar = tqdm(enumerate(train_dl), total=steps_per_epoch, leave=False)
     for step, batch in pbar:
+        global_step = epoch * steps_per_epoch + step
+        lr = sched(
+            step=global_step,
+            max_lr=train_cfg.lr,
+            max_steps=max_steps,
+            warmup_steps=train_cfg.warmup_steps,
+        )
+        opt.param_groups[0]["lr"] = lr
+        wandb.log({"lr": lr}, step=global_step)
+
         loss, accuracy = single_step(batch, train_xfms)  # type: ignore
-        wandb.log({"train_loss": loss, "train_acc": accuracy})
+        wandb.log({"train_loss": loss, "train_acc": accuracy}, step=global_step)
 
         opt.zero_grad()
         loss.backward()
@@ -154,5 +162,5 @@ for epoch in range(train_cfg.nepochs):
 
     val_loss = t.tensor(losses).mean()
     val_acc = t.tensor(accuracies).mean()
-    wandb.log({"val_loss": val_loss, "val_acc": val_acc})
+    wandb.log({"val_loss": val_loss, "val_acc": val_acc}, step=global_step)
     print(f"Epoch {epoch} loss: {val_loss:.4f}, acc: {val_acc:.4f}")

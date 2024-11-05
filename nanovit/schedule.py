@@ -1,7 +1,7 @@
 import math
 
 
-def linear_schedule(step: int, max_lr: float, max_steps: int, eps: float = 1e-8):
+def linear_schedule(step: int, max_lr: float, max_steps: int, eps: float = 1e-8, **kwargs):
     frac = 1 - step / max_steps
     return max_lr * frac + eps
 
