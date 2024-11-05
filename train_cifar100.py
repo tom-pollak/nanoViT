@@ -46,8 +46,8 @@ train_cfg = TrainConfig()
 
 
 vit_cfg = ViTConfig(
-    n_layers=24,
-    d_model=512,
+    n_layers=6,
+    d_model=192,
     d_proj=train_cfg.nclasses,
     image_res=(32, 32),
     patch_size=4,
@@ -59,7 +59,6 @@ vit_cfg = ViTConfig(
     ),
     mlp_mult=4,
 )
-
 
 # %% ███████████████████████████████  dataset & xfms  ███████████████████████████████
 
@@ -134,6 +133,10 @@ wandb.init(
 
 vit = ViT(vit_cfg).to(device)
 vit.init_weights_()
+n_params = sum(p.numel() for p in vit.parameters())
+print(f"Number of parameters: {n_params:,}")
+wandb.run.summary["n_params"] = n_params
+
 opt = t.optim.AdamW(vit.parameters(), lr=train_cfg.lr, weight_decay=train_cfg.wd)
 
 
