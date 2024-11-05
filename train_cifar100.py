@@ -7,12 +7,24 @@ import wandb
 import torch as t
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from torchvision.transforms import v2  # type: ignore
 from datasets import load_dataset, DatasetDict
 
 from nanovit import ViT, ViTConfig, build_preprocessor
 from nanovit.schedule import cosine_schedule, linear_schedule
 
 print = tqdm.external_write_mode()(print)  # tqdm friendly print
+
+num_workers = 10
+
+device = (
+    "cuda"
+    if t.cuda.is_available()
+    else "mps"
+    if t.backends.mps.is_available()
+    else "cpu"
+)
+
 
 # %% ███████████████████████████████████  config  ███████████████████████████████████
 
@@ -27,7 +39,6 @@ class TrainConfig:
     wd: float = 3e-2
     grad_clip: float = 1.0
     warmup_steps: int = 5_000
-    num_workers: int = 10
     sched: Literal["cosine_schedule", "linear_schedule"] = "cosine_schedule"
 
 
@@ -50,23 +61,6 @@ vit_cfg = ViTConfig(
 )
 
 
-# %% ███████████████████████████████████  model  ████████████████████████████████████
-
-device = (
-    "cuda"
-    if t.cuda.is_available()
-    else "mps"
-    if t.backends.mps.is_available()
-    else "cpu"
-)
-
-vit = ViT(vit_cfg).to(device)
-vit.init_weights_()
-
-
-opt = t.optim.AdamW(vit.parameters(), lr=train_cfg.lr, weight_decay=train_cfg.wd)
-
-
 # %% ███████████████████████████████  dataset & xfms  ███████████████████████████████
 
 dd: DatasetDict = load_dataset("uoft-cs/cifar100")  # type: ignore
@@ -82,8 +76,8 @@ train_xfms = transforms.Compose(
             interpolation=transforms.InterpolationMode.BICUBIC,
         ),
         transforms.RandomHorizontalFlip(),
-        transforms.RandAugment(num_ops=2, magnitude=10),
-        # transforms.AutoAugment(policy=transforms.AutoAugmentPolicy.CIFAR10)
+        # transforms.RandAugment(num_ops=2, magnitude=10),
+        transforms.AutoAugment(policy=transforms.AutoAugmentPolicy.CIFAR10),
         img2tensor,
     ]
 )
@@ -91,23 +85,25 @@ train_xfms = transforms.Compose(
 
 valid_xfms = transforms.Compose([img2tensor])
 
-train_batch_xfms = transforms.RandomChoice([transforms.AugMix()])
+mixup_or_cutmix = transforms.RandomChoice(
+    [
+        transforms.v2.MixUp(num_classes=train_cfg.nclasses),  # type: ignore
+        transforms.v2.CutMix(num_classes=train_cfg.nclasses),  # type: ignore
+    ]
+)
 
 
 def train_collate_fn(batch: list[dict]):
-    pixel_values = t.stack([train_xfms(im) for im in batch["img"]]).to(device)  # type: ignore
-    return {
-        "pixel_values": pixel_values,
-        "labels": t.tensor(batch["fine_label"], device=device),  # type: ignore
-    }
+    pixel_values = t.stack([train_xfms(x["img"]) for x in batch])
+    labels = t.tensor([x["fine_label"] for x in batch])
+    pixel_values, labels = mixup_or_cutmix(pixel_values, labels)
+    return pixel_values, labels
 
 
 def valid_collate_fn(batch: list[dict]):
-    pixel_values = t.stack([valid_xfms(im) for im in batch["img"]]).to(device)  # type: ignore
-    return {
-        "pixel_values": pixel_values,
-        "labels": t.tensor(batch["fine_label"], device=device),  # type: ignore
-    }
+    pixel_values = t.stack([valid_xfms(x["img"]) for x in batch])
+    labels = t.tensor([x["fine_label"] for x in batch])
+    return pixel_values, labels
 
 
 train_dl = DataLoader(
@@ -115,7 +111,7 @@ train_dl = DataLoader(
     batch_size=train_cfg.bs,
     shuffle=True,
     drop_last=True,
-    num_workers=train_cfg.num_workers,
+    num_workers=num_workers,
     collate_fn=train_collate_fn,
 )
 
@@ -123,24 +119,33 @@ valid_dl = DataLoader(
     dd["test"],  # type: ignore
     batch_size=train_cfg.val_bs,
     shuffle=False,
-    num_workers=train_cfg.num_workers,
+    num_workers=num_workers,
     collate_fn=valid_collate_fn,
 )
 
 
-# %% ██████████████████████████████████  training  ██████████████████████████████████
+# %% ████████████████████████████████  init & train  ████████████████████████████████
 
 wandb.init(
     project="nanovit-cifar100",
     config={"vit_cfg": asdict(vit_cfg), "train_cfg": asdict(train_cfg)},
 )
 
+vit = ViT(vit_cfg).to(device)
+vit.init_weights_()
+opt = t.optim.AdamW(vit.parameters(), lr=train_cfg.lr, weight_decay=train_cfg.wd)
 
-def single_step(batch: dict):
-    pixel_values, labels = batch["pixel_values"], batch["labels"]  # type: ignore
+
+def single_step(batch):
+    pixel_values, labels = batch
+    pixel_values, labels = pixel_values.to(device), labels.to(device)
     with t.autocast(device_type=device):
         logits = vit(pixel_values)
         loss = t.nn.functional.cross_entropy(logits, labels)
+
+    if labels.ndim != 1:  # mixup/cutmix
+        labels = labels.argmax(dim=-1)
+
     accuracy = (logits.argmax(dim=-1) == labels).float().mean()
     return loss, accuracy
 
