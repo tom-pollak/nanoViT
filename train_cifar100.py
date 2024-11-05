@@ -1,3 +1,8 @@
+"""
+2.7M param ViT
+200 epochs (~15mins on a 3090)
+Accuracy: 68.5%
+"""
 # %%
 import random
 from typing import Literal
@@ -43,7 +48,7 @@ class TrainConfig:
     sched: Literal["cosine_schedule", "linear_schedule"] = "cosine_schedule"
     # augmentation
     rand_crop_scale: tuple[float, float] = (0.9, 1.0)
-    hflip_p: float = 0.5
+    flip_p: float = 0.5
     mixup_p: float = 0.2
     autoaugment_policy: str = "cifar10"
 
@@ -78,7 +83,7 @@ train_xfms = transforms.Compose(
             scale=train_cfg.rand_crop_scale,
             interpolation=transforms.InterpolationMode.BICUBIC,
         ),
-        transforms.RandomHorizontalFlip(p=train_cfg.hflip_p),
+        transforms.RandomHorizontalFlip(p=train_cfg.flip_p),
         transforms.AutoAugment(
             policy=transforms.autoaugment.AutoAugmentPolicy(
                 train_cfg.autoaugment_policy
@@ -91,6 +96,7 @@ train_xfms = transforms.Compose(
 
 valid_xfms = transforms.Compose([img2tensor])
 
+# batch xfm
 mixup = transforms.v2.MixUp(alpha=1.0, num_classes=train_cfg.n_classes)  # type: ignore
 
 
@@ -166,7 +172,7 @@ def single_step(batch):
 
 
 sched = cosine_schedule if train_cfg.sched == "cosine_schedule" else linear_schedule
-steps_per_epoch = len(dd["train"]) // train_cfg.bs
+steps_per_epoch = len(train_dl)
 max_steps = train_cfg.n_epochs * steps_per_epoch
 
 for epoch in tqdm(range(train_cfg.n_epochs)):
@@ -185,23 +191,20 @@ for epoch in tqdm(range(train_cfg.n_epochs)):
 
         loss, accuracy = single_step(batch)  # type: ignore
         wandb.log({"train_loss": loss, "train_acc": accuracy}, step=global_step)
+        pbar.set_postfix({"loss": f"{loss:.4f}", "acc": f"{accuracy:.4f}"})
 
         opt.zero_grad()
         loss.backward()
         t.nn.utils.clip_grad_norm_(vit.parameters(), train_cfg.grad_clip)
         opt.step()
-        pbar.set_postfix({"loss": f"{loss:.4f}", "acc": f"{accuracy:.4f}"})
 
-    val_pbar = tqdm(
-        enumerate(valid_dl), total=len(dd["test"]) // train_cfg.val_bs, leave=False
-    )
     vit.eval()
     losses, accuracies = [], []
-    with t.no_grad():
-        for step, batch in val_pbar:
+    for step, batch in enumerate(tqdm(valid_dl, leave=False)):
+        with t.no_grad():
             loss, accuracy = single_step(batch)  # type: ignore
-            losses.append(loss.item())
-            accuracies.append(accuracy.item())
+        losses.append(loss.item())
+        accuracies.append(accuracy.item())
 
     val_loss = t.tensor(losses).mean()
     val_acc = t.tensor(accuracies).mean()
