@@ -29,24 +29,12 @@ vit_cfg = ViTConfig(
     ),
     mlp_mult=4,
 )
-# pool_type: gap
-# posemb: sincos2d
-
-# bfloat16
-# mixup: 0.2
-# 99% train test split
-
-# loss = "softmax_xent"
-
-# inception crop(224) flip_lr randaug(2, 10)
-# resize_small(256) central_crop(224)
-
 
 @dataclass
 class TrainConfig:
     nepochs: int = 180
     bs: int = 256
-    val_bs: int = 2048
+    val_bs: int = 512
     lr: float = 1e-3
     wd: float = 3e-2
     grad_clip: float = 1.0
@@ -118,7 +106,8 @@ sched = cosine_schedule if train_cfg.sched == "cosine_schedule" else linear_sche
 steps_per_epoch = len(dd["train"]) // train_cfg.bs
 max_steps = train_cfg.nepochs * steps_per_epoch
 
-for epoch in range(train_cfg.nepochs):
+epoch_pbar = tqdm(range(train_cfg.nepochs), total=train_cfg.nepochs)
+for epoch in epoch_pbar:
     train_dl = dd["train"].shuffle(seed=epoch).iter(train_cfg.bs, drop_last_batch=True)
     vit.train()
     pbar = tqdm(enumerate(train_dl), total=steps_per_epoch, leave=False)
@@ -138,6 +127,7 @@ for epoch in range(train_cfg.nepochs):
 
         opt.zero_grad()
         loss.backward()
+        t.nn.utils.clip_grad_norm_(vit.parameters(), train_cfg.grad_clip)
         opt.step()
         pbar.set_postfix(
             {"epoch": epoch, "loss": f"{loss:.4f}", "acc": f"{accuracy:.4f}"}
@@ -164,3 +154,4 @@ for epoch in range(train_cfg.nepochs):
     val_acc = t.tensor(accuracies).mean()
     wandb.log({"val_loss": val_loss, "val_acc": val_acc}, step=global_step)
     print(f"Epoch {epoch} loss: {val_loss:.4f}, acc: {val_acc:.4f}")
+    epoch_pbar.update(1)

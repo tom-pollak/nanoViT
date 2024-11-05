@@ -28,9 +28,6 @@ vit_cfg = ViTConfig(
     ),
     mlp_mult=4,
 )
-# pool_type: gap
-# posemb: sincos2d
-
 nclasses = 1000
 nepochs = 90
 bs = 1024
@@ -39,11 +36,17 @@ wd = 1e-4
 grad_clip = 1.0
 warmup_steps = 10_000
 sched = cosine_schedule
+loss = "softmax_xent"
+
+
+# pool_type: gap
+# posemb: sincos2d
+
 # bfloat16
 # mixup: 0.2
 # 99% train test split
 
-loss = "softmax_xent"
+# loss = "softmax_xent"
 
 # inception crop(224) flip_lr randaug(2, 10)
 # resize_small(256) central_crop(224)
