@@ -5,6 +5,7 @@ from tqdm import tqdm
 import wandb
 
 import torch as t
+from torch.utils.data import DataLoader
 from torchvision import transforms
 from datasets import load_dataset, DatasetDict
 
@@ -15,10 +16,28 @@ print = tqdm.external_write_mode()(print)  # tqdm friendly print
 
 # %% ███████████████████████████████████  config  ███████████████████████████████████
 
+
+@dataclass
+class TrainConfig:
+    nepochs: int = 200
+    nclasses: int = 100
+    bs: int = 256
+    val_bs: int = 512
+    lr: float = 1e-3
+    wd: float = 3e-2
+    grad_clip: float = 1.0
+    warmup_steps: int = 5_000
+    num_workers: int = 10
+    sched: Literal["cosine_schedule", "linear_schedule"] = "cosine_schedule"
+
+
+train_cfg = TrainConfig()
+
+
 vit_cfg = ViTConfig(
     n_layers=24,
     d_model=512,
-    d_proj=100,  # 100 classes
+    d_proj=train_cfg.nclasses,
     image_res=(32, 32),
     patch_size=4,
     n_heads=8,
@@ -30,19 +49,6 @@ vit_cfg = ViTConfig(
     mlp_mult=4,
 )
 
-@dataclass
-class TrainConfig:
-    nepochs: int = 180
-    bs: int = 256
-    val_bs: int = 512
-    lr: float = 1e-3
-    wd: float = 3e-2
-    grad_clip: float = 1.0
-    warmup_steps: int = 10_000
-    sched: Literal["cosine_schedule", "linear_schedule"] = "cosine_schedule"
-
-
-train_cfg = TrainConfig()
 
 # %% ███████████████████████████████████  model  ████████████████████████████████████
 
@@ -77,11 +83,49 @@ train_xfms = transforms.Compose(
         ),
         transforms.RandomHorizontalFlip(),
         transforms.RandAugment(num_ops=2, magnitude=10),
+        # transforms.AutoAugment(policy=transforms.AutoAugmentPolicy.CIFAR10)
         img2tensor,
     ]
 )
 
+
 valid_xfms = transforms.Compose([img2tensor])
+
+train_batch_xfms = transforms.RandomChoice([transforms.AugMix()])
+
+
+def train_collate_fn(batch: list[dict]):
+    pixel_values = t.stack([train_xfms(im) for im in batch["img"]]).to(device)  # type: ignore
+    return {
+        "pixel_values": pixel_values,
+        "labels": t.tensor(batch["fine_label"], device=device),  # type: ignore
+    }
+
+
+def valid_collate_fn(batch: list[dict]):
+    pixel_values = t.stack([valid_xfms(im) for im in batch["img"]]).to(device)  # type: ignore
+    return {
+        "pixel_values": pixel_values,
+        "labels": t.tensor(batch["fine_label"], device=device),  # type: ignore
+    }
+
+
+train_dl = DataLoader(
+    dd["train"],  # type: ignore
+    batch_size=train_cfg.bs,
+    shuffle=True,
+    drop_last=True,
+    num_workers=train_cfg.num_workers,
+    collate_fn=train_collate_fn,
+)
+
+valid_dl = DataLoader(
+    dd["test"],  # type: ignore
+    batch_size=train_cfg.val_bs,
+    shuffle=False,
+    num_workers=train_cfg.num_workers,
+    collate_fn=valid_collate_fn,
+)
 
 
 # %% ██████████████████████████████████  training  ██████████████████████████████████
@@ -92,9 +136,8 @@ wandb.init(
 )
 
 
-def single_step(batch: dict, preproc: transforms.Compose):
-    images, labels = batch["img"], t.tensor(batch["fine_label"], device=device)  # type: ignore
-    pixel_values = t.stack([preproc(im) for im in images]).to(device)
+def single_step(batch: dict):
+    pixel_values, labels = batch["pixel_values"], batch["labels"]  # type: ignore
     with t.autocast(device_type=device):
         logits = vit(pixel_values)
         loss = t.nn.functional.cross_entropy(logits, labels)
@@ -106,9 +149,7 @@ sched = cosine_schedule if train_cfg.sched == "cosine_schedule" else linear_sche
 steps_per_epoch = len(dd["train"]) // train_cfg.bs
 max_steps = train_cfg.nepochs * steps_per_epoch
 
-epoch_pbar = tqdm(range(train_cfg.nepochs), total=train_cfg.nepochs)
-for epoch in epoch_pbar:
-    train_dl = dd["train"].shuffle(seed=epoch).iter(train_cfg.bs, drop_last_batch=True)
+for epoch in tqdm(range(train_cfg.nepochs)):
     vit.train()
     pbar = tqdm(enumerate(train_dl), total=steps_per_epoch, leave=False)
     for step, batch in pbar:
@@ -122,7 +163,7 @@ for epoch in epoch_pbar:
         opt.param_groups[0]["lr"] = lr
         wandb.log({"lr": lr}, step=global_step)
 
-        loss, accuracy = single_step(batch, train_xfms)  # type: ignore
+        loss, accuracy = single_step(batch)  # type: ignore
         wandb.log({"train_loss": loss, "train_acc": accuracy}, step=global_step)
 
         opt.zero_grad()
@@ -132,9 +173,7 @@ for epoch in epoch_pbar:
         pbar.set_postfix(
             {"epoch": epoch, "loss": f"{loss:.4f}", "acc": f"{accuracy:.4f}"}
         )
-        pbar.update(1)
 
-    valid_dl = dd["test"].iter(train_cfg.val_bs)
     val_pbar = tqdm(
         enumerate(valid_dl), total=len(dd["test"]) // train_cfg.val_bs, leave=False
     )
@@ -142,11 +181,10 @@ for epoch in epoch_pbar:
     losses, accuracies = [], []
     with t.no_grad():
         for step, batch in val_pbar:
-            loss, accuracy = single_step(batch, valid_xfms)  # type: ignore
+            loss, accuracy = single_step(batch)  # type: ignore
             val_pbar.set_postfix(
                 {"epoch": epoch, "loss": f"{loss:.4f}", "acc": f"{accuracy:.4f}"}
             )
-            val_pbar.update(1)
             losses.append(loss.item())
             accuracies.append(accuracy.item())
 
@@ -154,4 +192,3 @@ for epoch in epoch_pbar:
     val_acc = t.tensor(accuracies).mean()
     wandb.log({"val_loss": val_loss, "val_acc": val_acc}, step=global_step)
     print(f"Epoch {epoch} loss: {val_loss:.4f}, acc: {val_acc:.4f}")
-    epoch_pbar.update(1)
