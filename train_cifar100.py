@@ -190,9 +190,7 @@ for epoch in tqdm(range(train_cfg.n_epochs)):
         loss.backward()
         t.nn.utils.clip_grad_norm_(vit.parameters(), train_cfg.grad_clip)
         opt.step()
-        pbar.set_postfix(
-            {"epoch": epoch, "loss": f"{loss:.4f}", "acc": f"{accuracy:.4f}"}
-        )
+        pbar.set_postfix({"loss": f"{loss:.4f}", "acc": f"{accuracy:.4f}"})
 
     val_pbar = tqdm(
         enumerate(valid_dl), total=len(dd["test"]) // train_cfg.val_bs, leave=False
@@ -202,9 +200,6 @@ for epoch in tqdm(range(train_cfg.n_epochs)):
     with t.no_grad():
         for step, batch in val_pbar:
             loss, accuracy = single_step(batch)  # type: ignore
-            val_pbar.set_postfix(
-                {"epoch": epoch, "loss": f"{loss:.4f}", "acc": f"{accuracy:.4f}"}
-            )
             losses.append(loss.item())
             accuracies.append(accuracy.item())
 

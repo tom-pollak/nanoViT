@@ -7,7 +7,7 @@ Model code: [nanovit/vit.py](nanovit/vit.py).
 - Accompanying exercise: implement each module from scratch yourself in [Colab](https://colab.research.google.com/github/tom-pollak/nanoViT/blob/main/tutorials/vit_from_scratch.ipynb)
 
 Training script for CIFAR-100: [train_cifar100.py](train_cifar100.py).
-- 2.7M params ViT for 200 epochs runs in ~15mins on a 3090, achieves 63%
+- 2.7M params ViT for 200 epochs runs in ~15mins on a 3090, achieves 68.5%
 
 Also a ConvMixer implementation ([nanovit/conv_mixer.py](nanovit/conv_mixer.py)) as a baseline.
 
