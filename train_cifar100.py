@@ -35,7 +35,7 @@ class TrainConfig:
     n_classes: int = 100
     n_epochs: int = 200
     bs: int = 256
-    val_bs: int = 512
+    val_bs: int = 4096
     lr: float = 1e-3
     wd: float = 3e-2
     grad_clip: float = 1.0
