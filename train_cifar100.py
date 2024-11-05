@@ -85,18 +85,18 @@ train_xfms = transforms.Compose(
 
 valid_xfms = transforms.Compose([img2tensor])
 
-mixup_or_cutmix = transforms.RandomChoice(
-    [
-        transforms.v2.MixUp(num_classes=train_cfg.nclasses),  # type: ignore
-        transforms.v2.CutMix(num_classes=train_cfg.nclasses),  # type: ignore
-    ]
-)
+# mixup_or_cutmix = transforms.RandomChoice(
+#     [
+#         transforms.v2.MixUp(num_classes=train_cfg.nclasses),  # type: ignore
+#         transforms.v2.CutMix(num_classes=train_cfg.nclasses),  # type: ignore
+#     ]
+# )
 
 
 def train_collate_fn(batch: list[dict]):
     pixel_values = t.stack([train_xfms(x["img"]) for x in batch])
     labels = t.tensor([x["fine_label"] for x in batch])
-    pixel_values, labels = mixup_or_cutmix(pixel_values, labels)
+    # pixel_values, labels = mixup_or_cutmix(pixel_values, labels)
     return pixel_values, labels
 
 
@@ -129,6 +129,7 @@ valid_dl = DataLoader(
 wandb.init(
     project="nanovit-cifar100",
     config={"vit_cfg": asdict(vit_cfg), "train_cfg": asdict(train_cfg)},
+    settings=wandb.Settings(code_dir="."),
 )
 
 vit = ViT(vit_cfg).to(device)
