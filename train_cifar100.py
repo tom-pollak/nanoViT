@@ -66,10 +66,8 @@ vit_cfg = ViTConfig(
     mlp_mult=4,
 )
 
-# %% ███████████████████████████████  dataset & xfms  ███████████████████████████████
 
-dd: DatasetDict = load_dataset("uoft-cs/cifar100")  # type: ignore
-feats = dd["train"].features
+# %% ████████████████████████████████████  xfms  ████████████████████████████████████
 
 img2tensor: transforms.Compose = build_preprocessor(vit_cfg)
 
@@ -96,7 +94,10 @@ valid_xfms = transforms.Compose([img2tensor])
 mixup = transforms.v2.MixUp(alpha=1.0, num_classes=train_cfg.n_classes)  # type: ignore
 
 
-###
+# %% ████████████████████████████████  dataset & dl  ████████████████████████████████
+
+dd: DatasetDict = load_dataset("uoft-cs/cifar100")  # type: ignore
+feats = dd["train"].features
 
 
 def train_collate_fn(batch: list[dict]):
@@ -134,8 +135,8 @@ valid_dl = DataLoader(
 # %% ████████████████████████████████████  init  ████████████████████████████████████
 
 vit = ViT(vit_cfg).to(device)
-vit = t.compile(vit)
 vit.init_weights_()
+vit = t.compile(vit)
 n_params = sum(p.numel() for p in vit.parameters())
 print(f"Number of parameters: {n_params:,}")
 
