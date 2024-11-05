@@ -5,7 +5,7 @@ from tqdm import tqdm
 import wandb
 
 import torch as t
-import torchvision.transforms.functional as TF
+from torchvision import transforms
 from datasets import load_dataset, DatasetDict
 
 from nanovit import ViT, ViTConfig, build_preprocessor
@@ -13,9 +13,7 @@ from nanovit.schedule import cosine_schedule, linear_schedule
 
 print = tqdm.external_write_mode()(print)  # tqdm friendly print
 
-# %%
-
-# ███████████████████████████████████  config  ███████████████████████████████████
+# %% ███████████████████████████████████  config  ███████████████████████████████████
 
 vit_cfg = ViTConfig(
     n_layers=8,
@@ -58,9 +56,7 @@ class TrainConfig:
 
 train_cfg = TrainConfig()
 
-# %%
-
-# ███████████████████████████████████  model  ████████████████████████████████████
+# %% ███████████████████████████████████  model  ████████████████████████████████████
 
 device = (
     "cuda"
@@ -75,18 +71,31 @@ vit = ViT(vit_cfg).to(device)
 
 opt = t.optim.AdamW(vit.parameters(), lr=train_cfg.lr, weight_decay=train_cfg.wd)
 
-# %%
 
-
-# ███████████████████████████████  dataset & xfms  ███████████████████████████████
+# %% ███████████████████████████████  dataset & xfms  ███████████████████████████████
 
 dd: DatasetDict = load_dataset("uoft-cs/cifar100")  # type: ignore
 feats = dd["train"].features
 
-preproc = build_preprocessor(vit_cfg)
+img2tensor: transforms.Compose = build_preprocessor(vit_cfg)
+
+train_xfms = transforms.Compose(
+    [
+        transforms.RandomResizedCrop(
+            size=vit_cfg.image_res,
+            scale=(0.9, 1.0),
+            interpolation=transforms.InterpolationMode.BICUBIC,
+        ),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandAugment(num_ops=2, magnitude=10),
+        img2tensor,
+    ]
+)
+
+valid_xfms = transforms.Compose([img2tensor])
 
 
-# %%
+# %% ██████████████████████████████████  training  ██████████████████████████████████
 
 wandb.init(
     project="nanovit-cifar100",
@@ -94,7 +103,7 @@ wandb.init(
 )
 
 
-def single_step(batch: dict):
+def single_step(batch: dict, preproc: transforms.Compose):
     images, labels = batch["image"], batch["fine_label"]  # type: ignore
     pixel_values = t.stack([preproc(im) for im in images]).to(device)
     with t.autocast(device_type=device):
@@ -116,7 +125,7 @@ for epoch in range(train_cfg.nepochs):
         enumerate(train_dl), total=len(dd["train"]) // train_cfg.bs, leave=False
     )
     for step, batch in pbar:
-        loss, accuracy = single_step(batch)  # type: ignore
+        loss, accuracy = single_step(batch, train_xfms)  # type: ignore
         wandb.log({"train_loss": loss, "train_acc": accuracy})
 
         opt.zero_grad()
@@ -135,7 +144,7 @@ for epoch in range(train_cfg.nepochs):
     losses, accuracies = [], []
     with t.no_grad():
         for step, batch in val_pbar:
-            loss, accuracy = single_step(batch)  # type: ignore
+            loss, accuracy = single_step(batch, valid_xfms)  # type: ignore
             val_pbar.set_postfix(
                 {"epoch": epoch, "loss": f"{loss:.4f}", "acc": f"{accuracy:.4f}"}
             )
