@@ -20,6 +20,7 @@ class ViTConfig:
     n_heads: int
     norm_data: tuple[tuple[float, float, float], tuple[float, float, float]] # (mean, std) to norm image
 
+    dropout: float = 0.
     mlp_mult: int = 4
     causal_attn: bool = False
 
@@ -73,6 +74,7 @@ class PatchEmbedding(nn.Module):
         self.class_embedding = nn.Parameter(t.empty(cfg.d_model))
         self.patch_embedding = nn.Parameter(t.empty(cfg.d_model, 3 * cfg.patch_size**2))
         self.position_embedding = nn.Parameter(t.empty(cfg.seq_length, cfg.d_model))
+        self.dropout = nn.Dropout(cfg.dropout)
 
     def forward(self, pixel_values):
         patched_pixels = einops.rearrange(
@@ -100,7 +102,7 @@ class PatchEmbedding(nn.Module):
         embeddings = t.cat([class_embeds, patch_embeds], dim=1)
 
         embeddings = embeddings + self.position_embedding
-
+        embeddings = self.dropout(embeddings)
         return embeddings
 
 
@@ -112,6 +114,7 @@ class Attention(nn.Module):
         self.k_proj = nn.Linear(cfg.d_model, cfg.d_model, bias=True)
         self.v_proj = nn.Linear(cfg.d_model, cfg.d_model, bias=True)
         self.c_proj = nn.Linear(cfg.d_model, cfg.d_model, bias=True)
+        self.score_drop = nn.Dropout(cfg.dropout)
 
     def forward(self, x):
         # batch seq d_model
@@ -135,6 +138,7 @@ class Attention(nn.Module):
 
         # full attention -- no causal masking
         scores = t.nn.functional.softmax(attn, dim=-1)  # seq_k
+        scores = self.score_drop(scores)
         z = einops.einsum(
             scores, v,
             """ \
@@ -154,10 +158,12 @@ class MLP(nn.Module):
         self.cfg = cfg
         self.c_fc = nn.Linear(cfg.d_model, cfg.d_model * cfg.mlp_mult, bias=True)
         self.c_proj = nn.Linear(cfg.d_model * cfg.mlp_mult, cfg.d_model, bias=True)
+        self.h_fc = nn.Dropout(cfg.dropout)
 
     def forward(self, x):
         h = self.c_fc(x)
         acts = quick_gelu(h)
+        acts = self.h_fc(acts)
         out = self.c_proj(acts)
         return out
 
@@ -167,13 +173,17 @@ class TransformerBlock(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.attn = Attention(cfg)
-        self.ln1 = nn.LayerNorm(cfg.d_model)
         self.mlp = MLP(cfg)
+
+        self.ln1 = nn.LayerNorm(cfg.d_model)
         self.ln2 = nn.LayerNorm(cfg.d_model)
 
+        self.drop1 = nn.Dropout(cfg.dropout)
+        self.drop2 = nn.Dropout(cfg.dropout)
+
     def forward(self, x):
-        x = x + self.attn(self.ln1(x))
-        x = x + self.mlp(self.ln2(x))
+        x = x + self.drop1(self.attn(self.ln1(x)))
+        x = x + self.drop2(self.mlp(self.ln2(x)))
         return x
 
 

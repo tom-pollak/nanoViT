@@ -16,12 +16,13 @@ print = tqdm.external_write_mode()(print)  # tqdm friendly print
 # %% ███████████████████████████████████  config  ███████████████████████████████████
 
 vit_cfg = ViTConfig(
-    n_layers=8,
+    n_layers=24,
     d_model=512,
     d_proj=100,  # 100 classes
     image_res=(32, 32),
     patch_size=4,
     n_heads=8,
+    dropout=0.1,
     norm_data=(
         (0.48145466, 0.4578275, 0.40821073),
         (0.26862954, 0.26130258, 0.27577711),
@@ -43,12 +44,11 @@ vit_cfg = ViTConfig(
 
 @dataclass
 class TrainConfig:
-    nclasses: int = 1000
-    nepochs: int = 90
-    bs: int = 1024
+    nepochs: int = 180
+    bs: int = 256
     val_bs: int = 2048
     lr: float = 1e-3
-    wd: float = 1e-4
+    wd: float = 3e-2
     grad_clip: float = 1.0
     warmup_steps: int = 10_000
     sched: Literal["cosine_schedule", "linear_schedule"] = "cosine_schedule"
