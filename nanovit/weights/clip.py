@@ -1,4 +1,5 @@
 from huggingface_hub import hf_hub_download
+
 import torch as t
 from nanovit.vit import (
     ViTConfig,
